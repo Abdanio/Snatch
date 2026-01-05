@@ -20,7 +20,7 @@
 ## 📋 Preview
 
 <div align="center">
-  <img src="preview.pngPNG" alt="SNATCH v1.0 Preview" width="800">
+  <img src="preview.png" alt="SNATCH v1.0 Preview" width="800">
   <p><i>SNATCH v1.0 in action - Beautiful, colorful, and easy to use!</i></p>
 </div>
 
