@@ -254,7 +254,7 @@ This project is licensed under the **MIT License** - see the LICENSE file for de
 Having issues or questions?
 
 - 💬 Open an [Issue](../../issues) on GitHub
-- 📧 Contact: *[your-email@example.com]*
+- 📧 Contact: *[cheeksparchezzi@gmail.com]*
 - ⭐ Star this project if you find it useful!
 
 ---
