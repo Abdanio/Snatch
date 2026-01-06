@@ -1,5 +1,7 @@
 <div align="center">
 
+<img src="images/Logo.png" alt="SNATCH Logo" width="600" style="border-radius: 50%; background: transparent;">
+
 # 🎵 SNATCH v1.0
 
 **Fast, Simple, and Powerful Audio Downloader**
