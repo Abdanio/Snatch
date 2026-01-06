@@ -20,7 +20,7 @@
 ## 📋 Preview
 
 <div align="center">
-  <img src="preview.pngPNG" alt="SNATCH v1.0 Preview" width="800">
+  <img src="preview.PNG" alt="SNATCH v1.0 Preview" width="800">
   <p><i>SNATCH v1.0 in action - Beautiful, colorful, and easy to use!</i></p>
 </div>
 
@@ -254,7 +254,7 @@ This project is licensed under the **MIT License** - see the LICENSE file for de
 Having issues or questions?
 
 - 💬 Open an [Issue](../../issues) on GitHub
-- 📧 Contact: *[your-email@example.com]*
+- 📧 Contact: *[cheeksparchezzi@gmail.com]*
 - ⭐ Star this project if you find it useful!
 
 ---
