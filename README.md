@@ -1,6 +1,6 @@
 <div align="center">
 
-<img src="images/Logo.png" alt="SNATCH Logo" width="600" style="border-radius: 50%; background: transparent;">
+<img src="images/Logo-Transparent.png" alt="SNATCH Logo" width="600">
 
 # 🎵 SNATCH v1.0
 
