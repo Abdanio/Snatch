@@ -1,0 +1,5 @@
+// SNATCH v1.6 Icon Resource File
+#include <windows.h>
+
+// Application Icon
+IDI_ICON1 ICON "..\\Logo Transparent.ico"
