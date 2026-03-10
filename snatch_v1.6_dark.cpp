@@ -1,5 +1,5 @@
-// SNATCH v1.6 - Modern YouTube Downloader with Dear ImGui - DARK THEME
-// Full feature integration from Win32 version
+// SNATCH v1.7 - Modern Multi-Platform Downloader with Dear ImGui - DARK THEME
+// Enhanced with smooth animations and multi-platform support
 
 #define UNICODE
 #define _UNICODE
@@ -17,6 +17,8 @@
 #include <string>
 #include <vector>
 #include <time.h>
+#include <ctype.h>
+#include <cmath>
 #include "sqlite3.h"
 
 #pragma comment(lib, "gdiplus.lib")
@@ -30,8 +32,8 @@
 #pragma comment(lib, "comctl32.lib")
 
 // Version Information
-#define APP_VERSION "1.6.0"
-#define APP_VERSION_INT 160
+#define APP_VERSION "1.7.0"
+#define APP_VERSION_INT 170
 
 // Constants
 #define MAX_QUEUE_SIZE 50
@@ -84,6 +86,8 @@ typedef struct {
     bool isDownloading;
     float progress;
     char status[128];
+    char platform[32];  // Platform name: YouTube, Instagram, TikTok, etc.
+    float animAlpha;    // Animation alpha for fade-in effect
 } DownloadItem;
 
 // Global state
@@ -99,6 +103,13 @@ static bool g_showAboutWindow = false;
 static bool g_showStatsWindow = false;
 static bool g_showWelcomeWindow = true; // Show on first launch
 
+// Animation state
+static float g_buttonPulseTime = 0.0f;
+static float g_logoRotation = 0.0f;
+static float g_windowFadeAlpha = 0.0f;
+static float g_queueItemAnimTime[MAX_QUEUE_SIZE] = {0};
+static bool g_animationsEnabled = true;
+
 // Input buffers
 static char g_urlInput[MAX_URL_LENGTH] = "";
 static char g_historySearch[256] = "";
@@ -108,6 +119,14 @@ const char* SETTINGS_FILE = "snatch_settings.ini";
 const char* DB_FILE = "snatch_history.db";
 const char* g_qualityOptions[] = { "Best", "4K (2160p)", "2K (1440p)", "1080p", "720p", "480p", "360p", "240p" };
 const char* g_typeOptions[] = { "Video", "Audio" };
+
+// Supported platforms - yt-dlp supports 1000+ sites!
+const char* g_supportedPlatforms[] = {
+    "YouTube", "Instagram", "Facebook", "Twitter/X", "TikTok",
+    "Vimeo", "Dailymotion", "Reddit", "Twitch", "Soundcloud",
+    "Bilibili", "Pinterest", "LinkedIn", "Tumblr", "And 1000+ more!"
+};
+const int g_numPlatforms = sizeof(g_supportedPlatforms) / sizeof(g_supportedPlatforms[0]);
 
 // Function declarations
 void LoadSettings();
@@ -136,6 +155,12 @@ void LoadCustomFont();
 void ApplyModernStyle();
 bool LoadLogoTexture();
 void CleanupLogoTexture();
+
+// Animation helper functions
+float EaseInOutCubic(float t);
+float EaseOutBounce(float t);
+void UpdateAnimations(float deltaTime);
+const char* DetectPlatform(const char* url);
 
 // Window procedure
 LRESULT WINAPI WndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam)
@@ -171,9 +196,9 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
     HICON hIcon = (HICON)LoadImageA(GetModuleHandle(NULL), MAKEINTRESOURCEA(101), IMAGE_ICON, 0, 0, LR_DEFAULTSIZE | LR_SHARED);
     
     // Create application window
-    WNDCLASSEXW wc = { sizeof(wc), CS_CLASSDC, WndProc, 0L, 0L, GetModuleHandle(nullptr), hIcon, nullptr, nullptr, nullptr, L"SNATCH v1.6", nullptr };
+    WNDCLASSEXW wc = { sizeof(wc), CS_CLASSDC, WndProc, 0L, 0L, GetModuleHandle(nullptr), hIcon, nullptr, nullptr, nullptr, L"SNATCH v1.7", nullptr };
     ::RegisterClassExW(&wc);
-    HWND hwnd = ::CreateWindowW(wc.lpszClassName, L"SNATCH v1.6 - YouTube Downloader", WS_OVERLAPPEDWINDOW, 100, 100, 1280, 720, nullptr, nullptr, wc.hInstance, nullptr);
+    HWND hwnd = ::CreateWindowW(wc.lpszClassName, L"SNATCH v1.7 - Multi-Platform Downloader", WS_OVERLAPPEDWINDOW, 100, 100, 1280, 720, nullptr, nullptr, wc.hInstance, nullptr);
 
     // Initialize Direct3D
     if (!CreateDeviceD3D(hwnd))
@@ -212,6 +237,10 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
 
     // Main loop
     bool done = false;
+    LARGE_INTEGER frequency, lastTime, currentTime;
+    QueryPerformanceFrequency(&frequency);
+    QueryPerformanceCounter(&lastTime);
+
     while (!done)
     {
         MSG msg;
@@ -224,6 +253,14 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
         }
         if (done)
             break;
+
+        // Calculate delta time for animations
+        QueryPerformanceCounter(&currentTime);
+        float deltaTime = (float)(currentTime.QuadPart - lastTime.QuadPart) / (float)frequency.QuadPart;
+        lastTime = currentTime;
+
+        // Update animations
+        UpdateAnimations(deltaTime);
 
         // Start ImGui frame
         ImGui_ImplDX11_NewFrame();
@@ -485,42 +522,70 @@ void RenderMainUI()
     ImGui::SetNextWindowSize(viewport->Size);
 
     ImGuiWindowFlags window_flags = ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoSavedSettings;
-    
+
+    // Apply fade-in animation to main window
+    if (g_windowFadeAlpha < 1.0f) {
+        ImGui::PushStyleVar(ImGuiStyleVar_Alpha, g_windowFadeAlpha);
+    }
+
     ImGui::Begin("Main Window", nullptr, window_flags);
     {
-        // Logo and Header
+        // Logo and Header with pulse animation
         if (g_logoTexture) {
-            // Center logo
-            float logoDisplayWidth = 120.0f;
+            // Center logo with subtle pulse effect
+            float logoDisplayWidth = 120.0f + sinf(g_buttonPulseTime * 2.0f) * 5.0f;
             float logoDisplayHeight = (float)g_logoHeight * (logoDisplayWidth / (float)g_logoWidth);
             float posX = (ImGui::GetContentRegionAvail().x - logoDisplayWidth) * 0.5f;
             ImGui::SetCursorPosX(posX);
             ImGui::Image((void*)g_logoTexture, ImVec2(logoDisplayWidth, logoDisplayHeight));
             ImGui::Spacing();
         }
-        
-        // Header
-        ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.26f, 0.59f, 0.98f, 1.0f));
+
+        // Header with glow effect
+        float glowIntensity = 0.5f + 0.5f * sinf(g_buttonPulseTime);
+        ImVec4 titleColor = ImVec4(0.26f, 0.59f, 0.98f, 0.8f + 0.2f * glowIntensity);
+        ImGui::PushStyleColor(ImGuiCol_Text, titleColor);
         ImGui::SetWindowFontScale(1.8f);
         ImGui::Text("SNATCH v%s", APP_VERSION);
         ImGui::SetWindowFontScale(1.0f);
         ImGui::PopStyleColor();
-        ImGui::Text("Modern YouTube Downloader with Professional UI");
-        
+        ImGui::Text("Multi-Platform Downloader - Supports 1000+ Websites!");
+
+        // Platform badges with animated colors
+        ImGui::Spacing();
+        ImGui::Text("Supported:");
+        ImGui::SameLine();
+        for (int i = 0; i < 5 && i < g_numPlatforms; i++) {
+            float hue = fmodf((g_buttonPulseTime * 0.1f + i * 0.15f), 1.0f);
+            ImVec4 badgeColor = ImVec4(0.2f + hue * 0.2f, 0.25f + hue * 0.15f, 0.35f + hue * 0.1f, 1.0f);
+            ImGui::PushStyleColor(ImGuiCol_Button, badgeColor);
+            ImGui::SmallButton(g_supportedPlatforms[i]);
+            ImGui::PopStyleColor();
+            if (i < 4) ImGui::SameLine();
+        }
+
         ImGui::Separator();
         ImGui::Spacing();
-        
-        // URL Input
-        ImGui::Text("YouTube URL:");
+
+        // URL Input with animated border
+        ImGui::Text("Video URL (YouTube, Instagram, TikTok, etc):");
+        float borderGlow = 0.2f + 0.1f * sinf(g_buttonPulseTime * 3.0f);
+        ImGui::PushStyleColor(ImGuiCol_Border, ImVec4(0.26f, 0.59f, 0.98f, borderGlow));
         ImGui::SetNextItemWidth(-200);
         ImGui::InputText("##url", g_urlInput, MAX_URL_LENGTH);
+        ImGui::PopStyleColor();
         ImGui::SameLine();
+
+        // Animated Add to Queue button
+        float buttonPulse = 1.0f + 0.05f * sinf(g_buttonPulseTime * 4.0f);
+        ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(8 * buttonPulse, 6 * buttonPulse));
         if (ImGui::Button("Add to Queue", ImVec2(180, 0))) {
             AddToQueue();
         }
-        
+        ImGui::PopStyleVar();
+
         ImGui::Spacing();
-        
+
         // Quality and Type selection
         ImGui::Text("Quality:");
         ImGui::SameLine();
@@ -532,25 +597,46 @@ void RenderMainUI()
         static int tempType = 0;
         ImGui::RadioButton("Video", &tempType, 0); ImGui::SameLine();
         ImGui::RadioButton("Audio", &tempType, 1);
-        
+
         ImGui::Spacing();
         ImGui::Separator();
         ImGui::Spacing();
-        
-        // Queue Section
+
+        // Queue Section with animations
         ImGui::Text("Download Queue (%d/%d):", (int)g_queue.size(), MAX_QUEUE_SIZE);
         ImGui::BeginChild("QueueList", ImVec2(0, 250), true);
         {
             for (size_t i = 0; i < g_queue.size(); i++) {
                 auto& item = g_queue[i];
                 ImGui::PushID((int)i);
-                
+
+                // Apply fade-in animation to queue items
+                if (item.animAlpha < 1.0f) {
+                    ImGui::PushStyleVar(ImGuiStyleVar_Alpha, item.animAlpha);
+                }
+
+                // Platform badge with color
+                ImVec4 platformColor = ImVec4(0.13f, 0.77f, 0.37f, 1.0f);
+                if (strstr(item.platform, "YouTube")) platformColor = ImVec4(0.9f, 0.2f, 0.2f, 1.0f);
+                else if (strstr(item.platform, "Instagram")) platformColor = ImVec4(0.8f, 0.3f, 0.5f, 1.0f);
+                else if (strstr(item.platform, "TikTok")) platformColor = ImVec4(0.0f, 0.9f, 0.8f, 1.0f);
+                else if (strstr(item.platform, "Twitter")) platformColor = ImVec4(0.3f, 0.6f, 1.0f, 1.0f);
+
+                ImGui::PushStyleColor(ImGuiCol_Button, platformColor);
+                ImGui::SmallButton(item.platform);
+                ImGui::PopStyleColor();
+                ImGui::SameLine();
+
                 ImGui::Text("%d. %s", (int)i+1, item.url);
                 ImGui::SameLine();
                 ImGui::Text("[%s - %s]", g_typeOptions[item.type], g_qualityOptions[item.quality]);
-                
+
                 if (item.isDownloading) {
+                    // Animated progress bar with pulse effect
+                    float progressPulse = 0.95f + 0.05f * sinf(g_queueItemAnimTime[i] * 5.0f);
+                    ImGui::PushStyleColor(ImGuiCol_PlotHistogram, ImVec4(0.26f * progressPulse, 0.59f * progressPulse, 0.98f * progressPulse, 1.0f));
                     ImGui::ProgressBar(item.progress / 100.0f, ImVec2(-100, 0));
+                    ImGui::PopStyleColor();
                     ImGui::SameLine();
                     ImGui::Text("%s", item.status);
                 } else {
@@ -559,18 +645,23 @@ void RenderMainUI()
                         RemoveFromQueue(i);
                     }
                 }
-                
+
+                if (item.animAlpha < 1.0f) {
+                    ImGui::PopStyleVar();
+                }
+
                 ImGui::Separator();
                 ImGui::PopID();
             }
         }
         ImGui::EndChild();
-        
+
         ImGui::Spacing();
-        
-        // Queue control buttons
+
+        // Queue control buttons with animation
         if (g_isDownloading) {
-            ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.8f, 0.4f, 0.2f, 1.0f));
+            float downloadPulse = 0.8f + 0.2f * sinf(g_buttonPulseTime * 6.0f);
+            ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.8f * downloadPulse, 0.4f * downloadPulse, 0.2f * downloadPulse, 1.0f));
             ImGui::Button("Downloading...", ImVec2(200, 40));
             ImGui::PopStyleColor();
         } else {
@@ -578,15 +669,15 @@ void RenderMainUI()
                 StartDownloads();
             }
         }
-        
+
         ImGui::SameLine();
         if (ImGui::Button("Clear Queue", ImVec2(200, 40))) {
             ClearQueue();
         }
-        
+
         ImGui::Spacing();
         ImGui::Spacing();
-        
+
         // Action buttons
         if (ImGui::Button("Settings", ImVec2(120, 40))) {
             g_showSettingsWindow = true;
@@ -603,9 +694,9 @@ void RenderMainUI()
         if (ImGui::Button("About", ImVec2(120, 40))) {
             g_showAboutWindow = true;
         }
-        
+
         ImGui::Spacing();
-        
+
         // Additional buttons with callbacks
         if (ImGui::Button("Open Downloads Folder", ImVec2(200, 40))) {
             OpenDownloadsFolder();
@@ -623,6 +714,10 @@ void RenderMainUI()
         }
     }
     ImGui::End();
+
+    if (g_windowFadeAlpha < 1.0f) {
+        ImGui::PopStyleVar();
+    }
 
     // Settings Window
     if (g_showSettingsWindow) {
@@ -707,49 +802,72 @@ void RenderMainUI()
 
     // About Window
     if (g_showAboutWindow) {
-        ImGui::SetNextWindowSize(ImVec2(450, 350), ImGuiCond_FirstUseEver);
+        ImGui::SetNextWindowSize(ImVec2(500, 450), ImGuiCond_FirstUseEver);
         if (ImGui::Begin("About SNATCH", &g_showAboutWindow)) {
             ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.26f, 0.59f, 0.98f, 1.0f));
             ImGui::Text("SNATCH v%s", APP_VERSION);
             ImGui::PopStyleColor();
-            ImGui::Text("Modern YouTube Downloader");
+            ImGui::Text("Modern Multi-Platform Downloader");
             ImGui::Spacing();
             ImGui::Separator();
             ImGui::Spacing();
             ImGui::Text("Features:");
-            ImGui::BulletText("Download videos in multiple qualities");
+            ImGui::BulletText("Download videos from 1000+ websites");
+            ImGui::BulletText("Support for YouTube, Instagram, TikTok, Facebook, Twitter, and more");
+            ImGui::BulletText("Multiple quality options (up to 4K)");
             ImGui::BulletText("Extract audio from videos");
-            ImGui::BulletText("Queue management");
+            ImGui::BulletText("Queue management with animations");
             ImGui::BulletText("Download history with SQLite");
-            ImGui::BulletText("Premium dark theme UI with Dear ImGui");
+            ImGui::BulletText("Premium dark theme UI with smooth animations");
             ImGui::BulletText("Professional Segoe UI font");
+            ImGui::BulletText("GPU-accelerated rendering");
             ImGui::Spacing();
             ImGui::Separator();
             ImGui::Spacing();
             ImGui::Text("Powered by:");
-            ImGui::BulletText("yt-dlp");
+            ImGui::BulletText("yt-dlp (supports 1000+ sites)");
             ImGui::BulletText("FFmpeg");
             ImGui::BulletText("Dear ImGui");
             ImGui::BulletText("SQLite");
+            ImGui::Spacing();
+            ImGui::Separator();
+            ImGui::Spacing();
+            ImGui::Text("Supported Platforms:");
+            for (int i = 0; i < g_numPlatforms; i++) {
+                ImGui::BulletText("%s", g_supportedPlatforms[i]);
+            }
         }
         ImGui::End();
     }
 
     // Welcome Window
     if (g_showWelcomeWindow) {
-        ImGui::SetNextWindowSize(ImVec2(500, 400), ImGuiCond_Always);
+        ImGui::SetNextWindowSize(ImVec2(550, 500), ImGuiCond_Always);
         ImGui::SetNextWindowPos(ImVec2(viewport->Size.x / 2, viewport->Size.y / 2), ImGuiCond_Always, ImVec2(0.5f, 0.5f));
-        if (ImGui::Begin("Welcome to SNATCH v1.6", &g_showWelcomeWindow, ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoCollapse)) {
+        if (ImGui::Begin("Welcome to SNATCH v1.7", &g_showWelcomeWindow, ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoCollapse)) {
             ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.26f, 0.59f, 0.98f, 1.0f));
-            ImGui::Text("Welcome to SNATCH v1.6!");
+            ImGui::SetWindowFontScale(1.5f);
+            ImGui::Text("Welcome to SNATCH v1.7!");
+            ImGui::SetWindowFontScale(1.0f);
             ImGui::PopStyleColor();
             ImGui::Spacing();
-            ImGui::TextWrapped("Thank you for using SNATCH, the modern YouTube downloader with professional dark UI.");
+            ImGui::TextWrapped("Thank you for using SNATCH, the modern multi-platform downloader with professional dark UI and smooth animations.");
+            ImGui::Spacing();
+            ImGui::Separator();
+            ImGui::Spacing();
+            ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.13f, 0.77f, 0.37f, 1.0f));
+            ImGui::Text("What's New in v1.7:");
+            ImGui::PopStyleColor();
+            ImGui::BulletText("Support for 1000+ websites (not just YouTube!)");
+            ImGui::BulletText("Smooth animations on buttons, progress bars, and UI elements");
+            ImGui::BulletText("Animated platform badges with color coding");
+            ImGui::BulletText("Pulsing effects and fade-in animations");
+            ImGui::BulletText("Enhanced visual feedback throughout the UI");
             ImGui::Spacing();
             ImGui::Separator();
             ImGui::Spacing();
             ImGui::Text("Quick Start:");
-            ImGui::BulletText("Paste a YouTube URL in the input field");
+            ImGui::BulletText("Paste a video URL (YouTube, Instagram, TikTok, etc.)");
             ImGui::BulletText("Select quality and type (Video/Audio)");
             ImGui::BulletText("Click 'Add to Queue'");
             ImGui::BulletText("Click 'Start Download' to begin");
@@ -931,7 +1049,7 @@ void AddToQueue()
 {
     if (strlen(g_urlInput) == 0) return;
     if (g_queue.size() >= MAX_QUEUE_SIZE) return;
-    
+
     DownloadItem item;
     strncpy(item.url, g_urlInput, MAX_URL_LENGTH);
     item.quality = g_settings.defaultQuality;
@@ -939,9 +1057,17 @@ void AddToQueue()
     item.isDownloading = false;
     item.progress = 0;
     strcpy(item.status, "Pending");
-    
+
+    // Detect platform from URL
+    const char* platform = DetectPlatform(g_urlInput);
+    strncpy(item.platform, platform, sizeof(item.platform) - 1);
+    item.platform[sizeof(item.platform) - 1] = '\0';
+
+    // Initialize animation
+    item.animAlpha = 0.0f;
+
     g_queue.push_back(item);
-    
+
     // Clear input
     g_urlInput[0] = '\0';
 }
@@ -1072,4 +1198,117 @@ char* GetCurrentTimestamp()
 void PlayNotificationSound()
 {
     PlaySoundA((LPCSTR)SND_ALIAS_SYSTEMASTERISK, NULL, SND_ALIAS_ID | SND_ASYNC);
+}
+
+// Animation helper functions
+float EaseInOutCubic(float t)
+{
+    if (t < 0.5f)
+        return 4.0f * t * t * t;
+    else {
+        float f = ((2.0f * t) - 2.0f);
+        return 0.5f * f * f * f + 1.0f;
+    }
+}
+
+float EaseOutBounce(float t)
+{
+    if (t < (1.0f / 2.75f))
+        return 7.5625f * t * t;
+    else if (t < (2.0f / 2.75f)) {
+        t -= (1.5f / 2.75f);
+        return 7.5625f * t * t + 0.75f;
+    }
+    else if (t < (2.5f / 2.75f)) {
+        t -= (2.25f / 2.75f);
+        return 7.5625f * t * t + 0.9375f;
+    }
+    else {
+        t -= (2.625f / 2.75f);
+        return 7.5625f * t * t + 0.984375f;
+    }
+}
+
+void UpdateAnimations(float deltaTime)
+{
+    if (!g_animationsEnabled) return;
+
+    // Update global animation timers
+    g_buttonPulseTime += deltaTime;
+    g_logoRotation += deltaTime * 0.5f;
+
+    // Fade in main window
+    if (g_windowFadeAlpha < 1.0f) {
+        g_windowFadeAlpha += deltaTime * 2.0f;
+        if (g_windowFadeAlpha > 1.0f) g_windowFadeAlpha = 1.0f;
+    }
+
+    // Update queue item animations
+    for (size_t i = 0; i < g_queue.size(); i++) {
+        auto& item = g_queue[i];
+
+        // Fade in animation for new items
+        if (item.animAlpha < 1.0f) {
+            item.animAlpha += deltaTime * 3.0f;
+            if (item.animAlpha > 1.0f) item.animAlpha = 1.0f;
+        }
+
+        // Update individual item animation time
+        if (i < MAX_QUEUE_SIZE) {
+            g_queueItemAnimTime[i] += deltaTime;
+        }
+    }
+}
+
+const char* DetectPlatform(const char* url)
+{
+    if (!url || strlen(url) == 0) return "Unknown";
+
+    // Convert to lowercase for comparison
+    char lowerUrl[MAX_URL_LENGTH];
+    strncpy(lowerUrl, url, MAX_URL_LENGTH - 1);
+    lowerUrl[MAX_URL_LENGTH - 1] = '\0';
+    for (int i = 0; lowerUrl[i]; i++) {
+        lowerUrl[i] = tolower(lowerUrl[i]);
+    }
+
+    // Check for platform keywords in URL
+    if (strstr(lowerUrl, "youtube.com") || strstr(lowerUrl, "youtu.be"))
+        return "YouTube";
+    else if (strstr(lowerUrl, "instagram.com"))
+        return "Instagram";
+    else if (strstr(lowerUrl, "facebook.com") || strstr(lowerUrl, "fb.com") || strstr(lowerUrl, "fb.watch"))
+        return "Facebook";
+    else if (strstr(lowerUrl, "twitter.com") || strstr(lowerUrl, "x.com"))
+        return "Twitter/X";
+    else if (strstr(lowerUrl, "tiktok.com"))
+        return "TikTok";
+    else if (strstr(lowerUrl, "vimeo.com"))
+        return "Vimeo";
+    else if (strstr(lowerUrl, "dailymotion.com"))
+        return "Dailymotion";
+    else if (strstr(lowerUrl, "reddit.com"))
+        return "Reddit";
+    else if (strstr(lowerUrl, "twitch.tv"))
+        return "Twitch";
+    else if (strstr(lowerUrl, "soundcloud.com"))
+        return "Soundcloud";
+    else if (strstr(lowerUrl, "bilibili.com"))
+        return "Bilibili";
+    else if (strstr(lowerUrl, "pinterest.com"))
+        return "Pinterest";
+    else if (strstr(lowerUrl, "linkedin.com"))
+        return "LinkedIn";
+    else if (strstr(lowerUrl, "tumblr.com"))
+        return "Tumblr";
+    else if (strstr(lowerUrl, "streamable.com"))
+        return "Streamable";
+    else if (strstr(lowerUrl, "vk.com"))
+        return "VK";
+    else if (strstr(lowerUrl, "imgur.com"))
+        return "Imgur";
+    else if (strstr(lowerUrl, "9gag.com"))
+        return "9GAG";
+    else
+        return "Other";
 }
